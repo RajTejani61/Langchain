@@ -1,0 +1,125 @@
+
+# Name search with college
+"""
+> Entering new AgentExecutor chain...
+Action : LinkedInSearch
+Action Input: {"type": "person", "name": "raj tejani", "city": "Surat", "college": "SSASIT"}Found 1 LinkedIn profiles : 
+
+1. Raj Tejani - Enthusiastic IT student | Exploring Python 
+        URL: https://in.linkedin.com/in/raj-tejani-5946252a4 
+        Info: View Raj Tejani's profile on LinkedIn, a professional community of 1 billion members ... Persuing Bsc-IT from SSASIT-Surat.See more...
+        Relevance: 1.00
+
+The LinkedInSearch tool found one relevant profile for "raj tejani" in "Surat" who attended "SSASIT". The profile details are provided in the observation. I should now formulate the final answer based on this information.
+Final Answer: I found the following LinkedIn profile:
+
+1. Raj Tejani - Enthusiastic IT student | Exploring Python
+   URL: https://in.linkedin.com/in/raj-tejani-5946252a4
+   Info: View Raj Tejani's profile on LinkedIn, a professional community of 1 billion members ... Persuing Bsc-IT from SSASIT-Surat.
+
+> Finished chain.
+"""
+
+
+# Company search
+"""
+> Entering new AgentExecutor chain...
+Action : LinkedInSearch
+Action Input: {"type": "company", "name": "AppStoneLab"}Found 5 LinkedIn profiles : 
+
+1. AppStoneLab 
+        URL: https://www.linkedin.com/company/appstonelab-technologies 
+        Info: Established in 2015 by visionaries who dared to dream, AppStone Lab Technologies has swiftly risen to be a touchstone in transformative software solutions....
+        Relevance: 1.00
+
+2. Appstone Pvt. Ltd. 
+        URL: https://in.linkedin.com/company/appstone_in 
+        Info: Appstone is your ultimate partner in design, branding, performance marketing, and application development. IT Services and IT Consulting Company. AppStoneLab...
+        Relevance: 1.00
+
+3. Megha M - AppStoneLab Technologies 
+        URL: https://www.linkedin.com/in/megha-m-212495257 
+        Info: Experience: AppStoneLab Technologies · Location: McKinney · 28 connections on LinkedIn. View Megha M's profile on LinkedIn, a professional community of 1...
+        Relevance: 1.00
+
+4. Appstone Pvt. Ltd. 
+        URL: https://at.linkedin.com/company/appstone_in 
+        Info: Appstone is your ultimate partner in design, branding, performance marketing, and application development. We specialize in transforming ideas into compelling...
+        Relevance: 1.00
+
+5. Nitin Viras - CTO at AppStoneLab Technologies LLP 
+        URL: https://in.linkedin.com/in/nitin-viras 
+        Info: CTO at AppStoneLab Technologies LLP · Experienced Web Developer with a demonstrated history of working in the information technology and services industry....
+        Relevance: 1.00
+
+Final Answer: I found the following LinkedIn profiles related to AppStoneLab:
+
+**Companies:**
+1.  **AppStoneLab Technologies**
+    *   URL: https://www.linkedin.com/company/appstonelab-technologies
+    *   Info: Established in 2015 by visionaries who dared to dream, AppStone Lab Technologies has swiftly risen to be a touchstone in transformative software solutions....
+2.  **Appstone Pvt. Ltd.**
+    *   URL: https://in.linkedin.com/company/appstone_in
+    *   Info: Appstone is your ultimate partner in design, branding, performance marketing, and application development. IT Services and IT Consulting Company. AppStoneLab...
+3.  **Appstone Pvt. Ltd.** (another entry)
+    *   URL: https://at.linkedin.com/company/appstone_in
+    *   Info: Appstone is your ultimate partner in design, branding, performance marketing, and application development. We specialize in transforming ideas into compelling...
+
+**Individuals associated with AppStoneLab:**
+1.  **Megha M - AppStoneLab Technologies**
+    *   URL: https://www.linkedin.com/in/megha-m-212495257
+    *   Info: Experience: AppStoneLab Technologies · Location: McKinney · 28 connections on LinkedIn. View Megha M's profile on LinkedIn, a professional community of 1...
+2.  **Nitin Viras - CTO at AppStoneLab Technologies LLP**
+    *   URL: https://in.linkedin.com/in/nitin-viras
+    *   Info: CTO at AppStoneLab Technologies LLP · Experienced Web Developer with a demonstrated history of working in the information technology and services industry....
+
+> Finished chain.
+
+"""
+
+
+
+# Person search
+"""
+> Entering new AgentExecutor chain...
+Action : LinkedInSearch
+Action Input: Harsh maniya|Surat|AI EngineerFound 5 LinkedIn profiles : 
+
+1. Harsh Maniya - AI Engineer | Crafting Intelligent AI Solutions 
+        URL: https://in.linkedin.com/in/harsh-maniya 
+        Info: # Harsh Maniya
+		AI Engineer | Crafting Intelligent AI Solutions | LangChain • LangGraph • MCP | n8n • make
+		Surat, Gujarat, India, IN  
+		500 connections, 638 followers
+		## About
+		None
+		## Experience
+		### A...
+        Relevance: 1.00
+
+2. Harsh Maniya - Computer Engineering Graduate 
+        URL: https://in.linkedin.com/in/harsh-maniya-6ab262202 
+        Info: Harsh Maniya. Computer Engineering Graduate | Full-Stack Developer. PortPro - Asia RMIT University. Notting Hill, Victoria, Australia. 635 ...See more...
+        Relevance: 1.00
+
+3. Harsh Maniya - Cloud Enthusiast | Full-Stack Developer 
+        URL: https://in.linkedin.com/in/harsh-maniya-a77a67257 
+        Info: Cloud Enthusiast | Full-Stack Developer ... Surat · 306 connections on LinkedIn. View Harsh Maniya's profile on LinkedIn, a professional community of 1 billion...
+        Relevance: 1.00
+
+4. Harsh Maniya - Student at xyz 
+        URL: https://in.linkedin.com/in/harsh-maniya-47a824360 
+        Info: Harsh Maniya. Student at xyz. xyz. Surat, Gujarat, India. 15 followers 15 connections. See your mutual connections. View mutual connections with ...See more...
+        Relevance: 1.00
+
+5. HARSH MANIYA - BRAHM POLYPLAST 
+        URL: https://in.linkedin.com/in/harsh-maniya-8a19a9188 
+        Info: HARSH MANIYA. BRAHM POLYPLAST. Maxgen Technologies Gujarat Technological University, Ahmedbabd. Surat, Gujarat, India. 465 followers 465 ...See more...
+        Relevance: 1.00
+
+
+
+> Finished chain.
+{'status': 'Success', 'output': {'input': 'Search for Harsh maniya in Surat who is a AI Engineer on LinkedIn', 'output': 'Agent stopped due to iteration limit or time limit.'}}
+"""
+
