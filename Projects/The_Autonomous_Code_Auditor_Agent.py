@@ -35,20 +35,18 @@ def extract_code(code: str):
     text = re.search(r"```(?:python|py)?\s*(.*?)\s*```", code, re.DOTALL | re.IGNORECASE)
     return text.group(1).strip() if text else code.strip()
 
-
+MAX_ATTEMPTS_STOP = 5
 @tool
-def fix_code(broken_code: str, mac_attempts: int = 3):
+def fix_code(broken_code: str, max_attempts: int = 3):
 	"""Function to fix broken code using LLM."""
 	
+	max_attempts = min(MAX_ATTEMPTS_STOP, max_attempts)
 	print("Fixing code...")
 	code_check_llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
 	attempts = 0
 	current_code = broken_code
-	if check_code.invoke(current_code):
-		print("Code is valid.")
-		return {"fixed_code": current_code, "is_valid": True, "attempts": attempts-1}
-	
-	for attempt in range(1, mac_attempts+1):
+
+	for attempt in range(1, max_attempts+1):
 		
 		prompt = (
 			"You are a Python assistant. Fix this broken python code so it is syntactically correct "
@@ -135,7 +133,12 @@ Workflow:
 	3) If invalid, call 'fix_code' tool to generate a proposed fix.
 	4) Use 'extract_code' to get the code from any returned text.
 	5) Call 'check_code' on the proposed fix; repeat if necessary.
-	Be concise and ensure the final output is a clean python snippet.
+Output Rules : 
+	- Be concise.
+	- Use only provided tools to fix the code.
+	- If a tool fails or returns an unexpected value, stop further tool calls and return the current best-effort code in one fenced Python block.
+	- Do not attempt to execute user code.
+	- At the end return only code with proper indentation (Return only code and Do not add ```python``` block).
 """
 
 agent = create_agent(
