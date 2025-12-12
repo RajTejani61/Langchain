@@ -4,12 +4,16 @@ Problem Statement: We want to analyze conflicting reports of the same event. Bui
 """
 
 from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint
-from langchain_community.vectorstores import FAISS
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_classic.text_splitter import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain.agents import create_agent
+from langchain_pinecone import PineconeVectorStore
+from langchain_core.tools import tool
+import os
 from dotenv import load_dotenv
 load_dotenv()
+
 
 llm = HuggingFaceEndpoint(
     model="openai/gpt-oss-120b",
@@ -54,36 +58,74 @@ len_chunk2 = len(chunk2)
 print("Chunk 1 length : ",len_chunk1)
 print("Chunk 2 length : ", len_chunk2)
 
-vectorstore = FAISS.from_documents(documents=chunk1, embedding=embeddings, ids=[str(i) for i in range(len_chunk1)])
-vectorstore.add_documents(documents=chunk2, ids=[str(len_chunk1 + i) for i in range(len_chunk2)])
-vectorstore.save_local("The Unbiased News Analyst vectorstore")
+INDEX_NAME = os.environ.get("PINECONE_INDEX", "the-unbiased-news-analyst")
+
+
+vectorstore = PineconeVectorStore(
+    index_name=INDEX_NAME, 
+    embedding=embeddings,
+    namespace="internship-pdf",
+)
+
+vectorstore.add_documents(chunk1)
+vectorstore.add_documents(chunk2)
+
+@tool
+def retriever_tool(query: str) -> str:
+    """
+    This tool is used to fetch supporting context from vectorstore by performing similarity search.
+    Use this tool to fetch supporting context from the two user-supplied files. 
+    Input should be a natural-language query. The tool returns retrieved text.
+    Chunks annotated with source tags like [FileA] or [FileB].
+    """
+    
+    retriever = vectorstore.as_retriever(
+                search_type="similarity",
+                search_kwargs={"k": 5},
+            )
+    rewrite_query_prompt = """
+    You are a query rewriting assistant. Rewrite the user's question into a short, concise question that is a suitable input for the Retriever tool.\n
+    Rules : 
+    - Do not change the meaning/intent of the question.\n
+    - Keep it short (5-20 words).\n
+    - Remove vague filler words (e.g., 'please', 'could you') and turn questions into keyphrases.\n
+    - If the user mentions specific sources or files, add those source tokens (e.g., FileA, FileB) so retriever can filter by metadata if available.\n"
+    Question : {query}
+    """
+    response = model.invoke(rewrite_query_prompt.format(query=query))
+    retrival_query = response.content.strip() if hasattr(response, "content") else str(response).strip() # type: ignore
+    top_docs = retriever.invoke(retrival_query)
+    
+    if not top_docs:
+        print("No relevant documents found in the provided files.")
+        exit()
+    
+    context = ""
+    
+    for i, doc in enumerate(top_docs, start=1):
+        source = doc.metadata.get("source", "UnknownSource")
+        content = doc.page_content.strip()
+        
+        context += f"\n Chunk {i} (Source ===>: {source})  \nContent ===>: {content}\n"
+    
+    return context
+
+prompt = """
+You are an assistant that answer the question using only the retrieved text (which comes from retriver tool that performs similarity search on two files supplied by the user). 
+Do not use any outside knowledge to asnwer the question and only use the retrieved text.
+If the Retriever doesn't contain the answer, say: 'I don't know the answer based on the provided documents.'
+At the end Keep answers length at most 5 to 10 sentences. Write answer with proper formatting and indentation. After the answer, list each source you used in square brackets (ex.- [File A], [File B]). 
+If the retrieved content contains conflicts, explicitly say both claims and indicate their sources.\n
+"""
 
 query = input("Enter the query : ").strip()
 
-retriver = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 5})
+agent = create_agent(
+    model=model,
+    tools=[retriever_tool],
+    system_prompt=prompt,
+)
 
-top_docs = retriver.invoke(query)
+res = agent.invoke({"messages": [{"role": "user", "content": query}]})
 
-if not top_docs:
-    print("No relevant documents found in the provided files.")
-    exit()
-
-context = ""
-
-for i, doc in enumerate(top_docs, start=1):
-    source = doc.metadata.get("source", "UnknownSource")
-    content = doc.page_content.strip()
-    
-    context += f"\n Chunk {i} (Source ===>: {source})  \nContent ===>: {content}\n"
-
-prompt = f"""
-You are an assistant that must answer the question using only the retrieved context below (which comes from two files supplied by the user). Do not use any outside knowledge. If the answer is not contained in the provided context, reply: "I don't know the answer based on the provided documents." 
-Keep answers length at most 5 to 20 sentences. After the answer, list each source you used in square brackets (ex.- [File A], [File B]). If the retrieved content contains conflicts, explicitly say both claims and indicate their sources.
-Question: \n{query}\n\n 
-Context: \n{context} 
-Answer:
-"""
-
-res = model.invoke(prompt)
-
-print(res.content)
+print(res["messages"][-1].content)
