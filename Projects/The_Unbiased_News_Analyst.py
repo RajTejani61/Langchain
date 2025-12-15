@@ -64,7 +64,6 @@ INDEX_NAME = os.environ.get("PINECONE_INDEX", "the-unbiased-news-analyst")
 vectorstore = PineconeVectorStore(
     index_name=INDEX_NAME, 
     embedding=embeddings,
-    namespace="internship-pdf",
 )
 
 vectorstore.add_documents(chunk1)
@@ -83,18 +82,8 @@ def retriever_tool(query: str) -> str:
                 search_type="similarity",
                 search_kwargs={"k": 5},
             )
-    rewrite_query_prompt = """
-    You are a query rewriting assistant. Rewrite the user's question into a short, concise question that is a suitable input for the Retriever tool.\n
-    Rules : 
-    - Do not change the meaning/intent of the question.\n
-    - Keep it short (5-20 words).\n
-    - Remove vague filler words (e.g., 'please', 'could you') and turn questions into keyphrases.\n
-    - If the user mentions specific sources or files, add those source tokens (e.g., FileA, FileB) so retriever can filter by metadata if available.\n"
-    Question : {query}
-    """
-    response = model.invoke(rewrite_query_prompt.format(query=query))
-    retrival_query = response.content.strip() if hasattr(response, "content") else str(response).strip() # type: ignore
-    top_docs = retriever.invoke(retrival_query)
+    
+    top_docs = retriever.invoke(query)
     
     if not top_docs:
         print("No relevant documents found in the provided files.")
@@ -113,9 +102,16 @@ def retriever_tool(query: str) -> str:
 prompt = """
 You are an assistant that answer the question using only the retrieved text (which comes from retriver tool that performs similarity search on two files supplied by the user). 
 Do not use any outside knowledge to asnwer the question and only use the retrieved text.
-If the Retriever doesn't contain the answer, say: 'I don't know the answer based on the provided documents.'
-At the end Keep answers length at most 5 to 10 sentences. Write answer with proper formatting and indentation. After the answer, list each source you used in square brackets (ex.- [File A], [File B]). 
-If the retrieved content contains conflicts, explicitly say both claims and indicate their sources.\n
+Instructions : 
+    - If the Retriever doesn't contain the answer, say: 'I don't know the answer based on the provided documents.'
+    - Rewrite the user's question into a short, concise question that is a suitable input for the Retriever tool.\n
+        Rules : 
+        1. Do not change the meaning/intent of the question.\n
+        2. Keep it short (5-20 words).\n
+        3. Remove vague filler words (e.g., 'please', 'could you') and turn questions into keyphrases.\n
+        4. If the user mentions specific sources or files, add those source tokens (e.g., FileA, FileB) so retriever can filter by metadata if available.
+    - At the end Keep answers length at most 5 to 10 sentences. Write answer with proper formatting and indentation. After the answer, list each source you used in square brackets (ex.- [File A], [File B]). 
+    - If the retrieved content contains conflicts, explicitly say both claims and indicate their sources.\n
 """
 
 query = input("Enter the query : ").strip()
