@@ -2,6 +2,7 @@ from langchain.agents import create_agent
 from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint
 from langchain_core.tools import tool
 from langgraph.checkpoint.memory import InMemorySaver
+from datetime import datetime
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -42,7 +43,7 @@ llm = HuggingFaceEndpoint(
 )
 model = ChatHuggingFace(llm=llm)
 
-system_prompt = """
+system_prompt = f"""
 You are a flight booking assistant. you must follow below rules strickely. 
 1. You are not allowed to:
     - Give explanations
@@ -54,7 +55,7 @@ You are a flight booking assistant. you must follow below rules strickely.
     - You can Ask a short clarification question if required information that is missing.
     - You can only return tool answers.
 
-2. Available tools :
+3. Available tools :
     - flight_details -> when the user wants to search or view available flights
     - book_flight -> when the user clearly wants to book a flight
     - cancel_flight -> when the user wants to cancel a booking
@@ -72,7 +73,7 @@ You are a flight booking assistant. you must follow below rules strickely.
     - If the user uses relative dates like:
         [today, tomorrow, yesterday, day after tomorrow, next week, next month, this week, this month]
     - Convert them to the format DD-MM-YYYY
-    - Use the current date as reference.
+    - Use the current date  = {datetime.today().strftime('%d-%m-%Y')} as reference.
 
 """
 
