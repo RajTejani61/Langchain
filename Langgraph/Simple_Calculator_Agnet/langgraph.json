@@ -1,0 +1,13 @@
+{
+	"dependencies": [
+		"langgraph",
+		"langchain",
+		"langchain_core",
+		"langchain_huggingface"
+	],
+	"graphs": {
+		"calculator": {
+			"path": "calculator_agent:agent"
+		}
+	}
+}
