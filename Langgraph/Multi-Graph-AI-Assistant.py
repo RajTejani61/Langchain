@@ -13,29 +13,24 @@ def math_node(state: MessageState):
     numbers = [int(x) for x in text.replace("+", " ").split() if x.isdigit()]
 
     if numbers:
-        return {"output": f"Result: {sum(numbers)}"}
+        result =  {"output": f"Result: {sum(numbers)}"}
+    else: 
+        result =  {"output": "Math operation is not supported."}
 
-    return {"output": "Math operation is not supported."}
-
-math_graph = StateGraph(MessageState)
-math_graph.add_node("math", math_node)
-math_graph.add_edge(START, "math")
-math_graph.add_edge("math", END)
-math_agent = math_graph.compile()
+    return {
+        "messages" : [AIMessage(content=f"{result}")],
+        "output" : result,
+    }
 
 
 def clean_text(state: MessageState):
     text = state["messages"][-1].content.lower() # type: ignore
     cleaned = text.strip()
     return {
-		"output": f"Cleaned text : {cleaned}"
+        "messages": [AIMessage(content=f"Cleaned text : {cleaned}")],
+		"output": cleaned
 	}
 
-text_graph = StateGraph(MessageState)
-text_graph.add_node("clean_text", clean_text)
-text_graph.add_edge(START, "clean_text")
-text_graph.add_edge("clean_text", END)
-text_agent = text_graph.compile()
 
 
 def router_node(state: MessageState):
@@ -46,36 +41,28 @@ def router_node(state: MessageState):
     else:
         return {"route": "clean"}
 
-def call_agent_node(state: MessageState):
-    if state["route"] == "math":
-        result = math_agent.invoke(state)
-    else:
-        result = text_agent.invoke(state)
 
-    return {
-		"messages": [AIMessage(content=result["output"])],
-        "output": result["output"]
-        }
+graph = StateGraph(MessageState)
 
-call_agent_graph = StateGraph(MessageState)
-call_agent_graph.add_node("router", router_node)
-call_agent_graph.add_node("call_agent", call_agent_node)
+graph.add_node("router", router_node)
+graph.add_node("math", math_node)
+graph.add_node("clean", clean_text)
 
-call_agent_graph.add_edge(START, "router")
-call_agent_graph.add_edge("router", "call_agent")
-call_agent_graph.add_edge("call_agent", END)
-app = call_agent_graph.compile()
+graph.add_edge(START, "router")
+graph.add_conditional_edges(
+    "router",
+    lambda state: state["route"],
+    {
+        "math": "math",
+        "clean": "clean",
+    }
+)
+graph.add_edge("math", END)
+graph.add_edge("clean", END)
 
+app = graph.compile()
 
-print("=== ROUTER GRAPH ===")
 print(app.get_graph().print_ascii())
-
-print("=== MATH GRAPH ===")
-print(math_agent.get_graph().print_ascii())
-
-print("=== TEXT GRAPH ===")
-print(text_agent.get_graph().print_ascii())
-
 
 message = [HumanMessage(content="add 5 + 6")]
 # message = [HumanMessage(content="              clen text")]
@@ -86,70 +73,32 @@ for m in response["messages"]:
 
 
 """
-=== ROUTER GRAPH ===
-+-----------+  
-| __start__ |  
-+-----------+  
-       *       
-       *       
-       *       
-  +--------+   
-  | router |   
-  +--------+   
-       *       
-       *       
-       *       
-+------------+ 
-| call_agent |
-+------------+
-       *
-       *
-       *
-  +---------+
-  | __end__ |
-  +---------+
+      +-----------+        
+      | __start__ |        
+      +-----------+        
+             *
+             *
+             *
+        +--------+
+        | router |
+        +--------+
+        ..       .
+       .          ..       
+      .             .      
++-------+        +------+  
+| clean |        | math |  
++-------+        +------+  
+        **       *
+          *    **
+           *  *
+       +---------+
+       | __end__ |
+       +---------+
 None
-
-=== MATH GRAPH ===
-+-----------+
-| __start__ |
-+-----------+
-      *
-      *
-      *
-  +------+
-  | math |
-  +------+
-      *
-      *
-      *
- +---------+
- | __end__ |
- +---------+
-None
-
-=== TEXT GRAPH ===
-+-----------+
-| __start__ |
-+-----------+
-       *
-       *
-       *
-+------------+
-| clean_text |
-+------------+
-       *
-       *
-       *
-  +---------+
-  | __end__ |
-  +---------+
-None
-
 ================================ Human Message =================================
 
 add 5 + 6
 ================================== Ai Message ==================================
 
-Result: 11
+{'output': 'Result: 11'}
 """
