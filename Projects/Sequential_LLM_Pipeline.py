@@ -6,55 +6,46 @@ Project 1:
 
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph import MessagesState
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_huggingface import HuggingFaceEndpoint, ChatHuggingFace
-from langchain_ollama import ChatOllama
 from dotenv import load_dotenv
 load_dotenv() 
 
 class MessageState(MessagesState):
-    plan : str | None
-    approved_plan: str | None
     final_answer: str | None
 
+def plan_and_write(state: MessageState):
+    system_prompt = """
+        You are an expert writer.
 
-def planner(state: MessageState):
-    prompt = f"""
-    Create only 5 bullet points containing 1 sentence each for answering the following question.
-	Do NOT answer the question.
-	Question:
-	{state['messages'][-1].content}
-	"""
-    response = model.invoke(prompt)
-    return {
-		"plan": response.content
-	}
+        Follow this exact process internally:
+        1. First, generate a concise plan of exactly 5 bullet points.
+        - Each bullet must be ONE sentence.
+        - Do NOT answer the question yet.
+        2. Then, using ONLY that plan, write a detailed, clear final answer.
 
-def humanInTheLoop(state: MessageState):
-    print("\nGenerated Plan:\n", state['plan'])
-    decision = input("Approve? (y/n/edit): ").strip().lower()
+        Output format (strict):
+        PLAN:
+        - bullet 1
+        - bullet 2
+        - bullet 3
+        - bullet 4
+        - bullet 5
 
-    approved_plan = state['plan']
-    if decision == "edit":
-        approved_plan = input("Enter revised plan:\n")
-    elif decision == "n":
-        approved_plan = None
-    
-    return {
-		"approved_plan": approved_plan
-	}
+        FINAL ANSWER:
+        <final answer here>
+    """
+    messages = [
+        SystemMessage(content=system_prompt),
+        state["messages"][-1]  # last user question
+    ]
+    response = model.invoke(messages)
 
-def detailed_answer_node(state: MessageState):
-    prompt = f"""
-	Using ONLY the approved plan below, write the final answer.
-	Approved Plan:
-	{state['approved_plan']}
-	"""
-    response = model.invoke(prompt)
     return {
         "final_answer": response.content,
-		"messages": state["messages"] + [AIMessage(content=response.content)]
+        "messages": state["messages"] + [AIMessage(content=response.content)]
     }
+
 
 llm = HuggingFaceEndpoint(
 	model="openai/gpt-oss-120b",
@@ -62,25 +53,17 @@ llm = HuggingFaceEndpoint(
 )
 model = ChatHuggingFace(llm=llm)
 
-# model = ChatOllama(model="llama3")
-
 graph = StateGraph(MessageState)
 
-graph.add_node("planner", planner) 
-graph.add_node("feedback", humanInTheLoop) 
-graph.add_node("writer", detailed_answer_node) 
+graph.add_node("plan_and_write", plan_and_write)
 
-graph.add_edge(START, "planner")
-graph.add_edge("planner", "feedback")
-graph.add_edge("feedback", "writer")
-graph.add_edge("writer", END)
+graph.add_edge(START, "plan_and_write")
+graph.add_edge("plan_and_write", END)
 
 app = graph.compile()
 
 messages = [HumanMessage(content="can you give me road map of deep learning?")]
-response = app.invoke({"messages": messages}) #type: ignore
 
-
-for m in response["messages"]:
-	m.pretty_print()
-
+for response in app.stream({"messages": messages}, stream_mode="values"): # type: ignore
+    for m in response["messages"]:
+        m.pretty_print()
