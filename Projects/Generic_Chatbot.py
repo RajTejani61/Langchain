@@ -5,93 +5,184 @@ Build a system that dynamically categorizes user queries (Billing, Technical, or
 
 from langgraph.graph import StateGraph, START, END, MessagesState
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
-from langchain_huggingface import HuggingFaceEndpoint, ChatHuggingFace
+from langchain_groq import ChatGroq
 from typing import Literal
-import json
+from pydantic import BaseModel
 from dotenv import load_dotenv
 load_dotenv()
 
-llm = HuggingFaceEndpoint(
-	model="openai/gpt-oss-120b",
-	task="text-generation",
-)
-model = ChatHuggingFace(llm=llm)
 
 class MessageState(MessagesState):
     category: Literal["billing", "technical", "general"]
     answer : str | None
 
-def categorize_and_answer(state: MessageState):
-    system_prompt = """
-        You are a customer support assistant.
+class category_output(BaseModel):
+    category : Literal["billing", "technical", "general"]
 
-		Step 1: Categorize the user's query into EXACTLY one category:
+
+category_model = ChatGroq(model="meta-llama/llama-4-scout-17b-16e-instruct").with_structured_output(category_output)
+billing_model = ChatGroq(model="meta-llama/llama-4-scout-17b-16e-instruct")
+technical_model = ChatGroq(model="meta-llama/llama-4-scout-17b-16e-instruct")
+general_model = ChatGroq(model="meta-llama/llama-4-scout-17b-16e-instruct")
+
+
+def categorize(state: MessageState):
+    system_prompt = """
+        You are a classifier agent. Your job is to categorize the user's query into EXACTLY one category. 
+		The categories are:
 		- billing
 		- technical
 		- general
-
-		Step 2: Based on the category, answer using these rules:
-
-		Billing:
-		- Answer billing questions
-		- Handle payments, subscriptions, invoices
-		- Be policy-focused and precise
-
-		Technical:
-		- Answer technical questions
-		- Debug, explain errors, give steps
-		- Ask clarifying questions if needed
-
-		General:
-		- Answer general questions
-		- Give high-level product explanations
-		- Be friendly and simple
-
-		Output instrcutions: 
-        STRICT JSON:
-		{
-			"category": "billing | technical | general",
-			"answer": "final answer"
-		}
-    """
-    
+        """
     message = [
 		SystemMessage(content=system_prompt),
 		state["messages"][-1].content
 	]
-    
-    response = model.invoke(message)
-    
-    raw_content = response.content
-    
-	# content=
-	# '{\n  "category": "billing",\n  "answer": "I’m sorry to hear that your payment didn’t go through even though the amount was deducted. This usually happens when the transaction is flagged as pending or when the merchant’s system doesn’t register the payment correctly. Please try the following steps:\\n\\n1. **Check your bank/ card statement** – Verify whether the amount appears as a pending charge or a completed transaction.\\n2. **Wait 24‑48 hours** – Sometimes the payment will automatically reverse if the merchant cannot capture it.\\n3. **If the charge is still pending after 48\u202fhours**, contact your bank or card issuer to request a reversal.\\n4. **Reach out to our support team** with the transaction ID, the email associated with your account, and the approximate time of the attempted payment. We’ll investigate on our side and, if needed, issue a refund or re‑process the payment.\\n\\nWe aim to resolve billing issues quickly, so please let us know the details and we’ll take care of it for you."\n}' 
-	# additional_kwargs={} response_metadata={'token_usage': {'completion_tokens': 290, 'prompt_tokens': 266, 'total_tokens': 556}, 'model_name': 'openai/gpt-oss-120b', 'system_fingerprint': 'fp_6b677c2caf', 'finish_reason': 'stop', 'logprobs': None} id='lc_run--019b3022-974c-7aa3-b643-917b0f8949bf-0' 
-	# usage_metadata={'input_tokens': 266, 'output_tokens': 290, 'total_tokens': 556}
-    
-    data = json.loads(raw_content) # type: ignore
-    category = data["category"]
-    answer = data["answer"]
+    response = category_model.invoke(message)
+    category = response.category # type: ignore
     return {
-		"category" : category,
-		"answer" : answer,
-		"messages" : state["messages"] + [AIMessage(content=answer)]
+		"category": category,
+		"messages": state["messages"] + [AIMessage(content=f"Query : '{state['messages'][-1].content}' \nCategory : {category}")]
 	}
 
-graph = StateGraph(MessageState)
+def billing_node(state: MessageState):
+    system_prompt = """
+		You are a Billing Support Agent.
 
-graph.add_node("categorize_and_answer", categorize_and_answer)
+		Your role:
+		- Handle questions related to billing, payments, invoices, refunds, subscriptions, pricing, and charges.
+		- Explain billing issues clearly and politely.
+		- Ask for clarification ONLY if required to resolve the issue.
+		- Do NOT provide technical troubleshooting steps.
+		- Do NOT speculate or invent charges.
+		- If account-specific data is needed, clearly state that you cannot access personal account details.
 
-graph.add_edge(START, "categorize_and_answer")
-graph.add_edge("categorize_and_answer", END)
+		Response guidelines:
+		- Be concise and professional.
+		- Use simple language.
+		- Provide step-by-step guidance only when necessary.
+		- If the issue cannot be resolved, explain the next support action clearly.
 
-app = graph.compile()
+		Tone: Calm, helpful, and customer-friendly.
+    """
+    message = [
+		SystemMessage(content=system_prompt), 
+		state["messages"][-1].content,
+	]
+    response = billing_model.invoke(message)
+    return {
+		"answer": response.content,
+		"messages": state["messages"] + [AIMessage(content=response.content)]
+	}
 
-# messages = [HumanMessage(content="I had issues with the LangGraph library")]
-messages = [HumanMessage(content="My payment failed but money was deducted")]
+def technical_node(state: MessageState):
+    system_prompt = """
+		You are a Technical Support Engineer.
 
-response = app.invoke({"messages": messages}) # type: ignore
+		Your role:
+		- Handle technical issues, bugs, errors, configuration problems, APIs, libraries, and system behavior.
+		- Analyze the problem logically and suggest actionable solutions.
+		- Ask follow-up questions ONLY if critical details are missing.
+		- Do NOT discuss billing or pricing.
+		- Do NOT guess unsupported features.
+
+		Response guidelines:
+		- Use clear technical explanations.
+		- Provide step-by-step fixes when applicable.
+		- Mention common causes and best practices.
+		- If unsure, explain what information is needed next.
+
+		Tone: Precise, professional, and solution-oriented.
+    """
+    message = [
+		SystemMessage(content=system_prompt),
+		state["messages"][-1].content,
+	]
+    response = technical_model.invoke(message)
+    return {
+		"answer": response.content,
+		"messages": state["messages"] + [AIMessage(content=response.content)]
+	}
+
+def general_node(state: MessageState):
+    system_prompt = """
+		You are a General Support Assistant.
+
+		Your role:
+		- Handle general questions about features, usage, capabilities, and documentation.
+		- Provide clear explanations without going into deep technical or billing details.
+		- Redirect the user politely if the question belongs to billing or technical support.
+		- Do NOT provide speculative or unofficial information.
+
+		Response guidelines:
+		- Keep answers simple and easy to understand.
+		- Use examples when helpful.
+		- Avoid unnecessary technical jargon.
+
+		Tone: Friendly, informative, and approachable.
+    """
+    message = [
+		SystemMessage(content=system_prompt),
+		state["messages"][-1].content,
+	]
+    response = general_model.invoke(message)
+    return {
+		"answer" : response.content,
+		"messages": state["messages"] + [AIMessage(content=response.content)]
+	}
+
+
+graph = StateGraph(MessagesState)
+
+graph.add_node("categorize", categorize)
+graph.add_node("billing_node", billing_node)
+graph.add_node("technical_node", technical_node)
+graph.add_node("general_node", general_node)
+
+graph.add_edge(START, "categorize")
+graph.add_conditional_edges(
+	"categorize",
+	lambda state: state["category"],
+	{
+		"billing": "billing_node",
+		"technical": "technical_node",
+		"general": "general_node",
+	}
+)
+graph.add_edge("billing_node", END)
+graph.add_edge("technical_node", END)
+graph.add_edge("general_node", END)
+
+agent = graph.compile()
+
+# messages = [HumanMessage(content="I had returned my order a week ago. When will I get a refund?")]
+messages = [HumanMessage(content="I had issue in the LangGraph about Serializer in persistance. explain serializer?")]
+response = agent.invoke({"messages": messages}) # type: ignore
 
 for m in response["messages"]:
 	m.pretty_print()
 
+
+"""
+                             +-----------+
+                             | __start__ |
+                             +-----------+
+                                    *
+                                    *
+                                    *
+                            +------------+
+                            | categorize |.
+                         ...+------------+ ....
+                    .....          .           .....
+                ....               .                ....
+             ...                   .                    ...
++--------------+           +--------------+           +----------------+
+| billing_node |           | general_node |           | technical_node |
++--------------+****       +--------------+         **+----------------+
+                    *****          *           *****
+                         ****      *       ****
+                             ***   *    ***
+                              +---------+
+                              | __end__ |
+                              +---------+
+"""
