@@ -18,7 +18,7 @@ create_research_prompt = """
 
 	Rules:
 	- Generate 6-8 questions
-	- Each question must be specific and researchable
+	- Each questio	n must be specific and researchable
 	- Avoid generic or vague wording
 	- Do NOT answer the questions
 
@@ -32,26 +32,32 @@ create_research_prompt = """
 """
 
 create_research_document_prompt = """
-	You are an expert research analyst.
-	You are given raw research excerpts collected from multiple sources.
+You are writing a factual research brief using ONLY the provided context.
 
-	Your task:
-	- Synthesize the content into a structured research document
-	- The document MUST be based only on the provided research
-	- Do NOT hallucinate or add new facts
+CITATION RULES (STRICT)
+- Every factual sentence MUST end with a clickable URL in square brackets.
+  Example:
+  India's coffee production began in the Baba Budan Hills. (https://example.com)
 
-	Document structure:
-	1. Introduction (context + scope)
-	2. Key Findings (grouped by theme)
-	3. Comparative Insights
-	4. Trends & Patterns
-	5. Gaps / Limitations in Research
+- URLs MUST come ONLY from the provided context.
+- DO NOT invent, shorten, or modify URLs.
+- DO NOT use reference IDs like [web:1].
+- DO NOT add a separate references or links section unless explicitly asked.
+- If a sentence has no matching URL in the context, REMOVE the sentence.
 
-	Rules:
-	- Write clearly and professionally
-	- Use headings
-	- Avoid repetition
-	- If research is weak, explicitly mention gaps
+OUTPUT RULES:
+- Clear section headers
+- Bullet points (1–2 sentences each)
+- Inline citations immediately after facts
+- No opinions, no speculation
+
+FORMAT:
+- Opening Summary (2 sentences max)
+- Thematic sections
+- Make it look like Research document
+- Reviewed Resources list using [web:#] only
+
+Return ONLY the document.
 """
 
 evaluate_research_prompt = """
@@ -81,8 +87,18 @@ evaluate_research_prompt = """
 		- improvement_suggestion MUST be null or a short string
 
 	DO NOT explain anything.
-	DO NOT add extra text.
-	Output STRICT JSON.
+	You MUST return ONLY valid JSON.
+	You MUST NOT include explanations, reasoning, markdown, or commentary.
+	You MUST return a SINGLE JSON OBJECT (not a list).
+	
+	OUTPUT SCHEMA : 
+	{
+		"relevance_score": number,
+		"coverage_score": number,
+		"overall_score": number,
+		"improvement_type": "no_improvement" | "rewrite_questions" | "rewrite_document",
+		"improvement_suggestion": string
+	}
 	Output example:
 	exmaple 1 : {{
 		"relevance_score": 0.6,

@@ -1,5 +1,6 @@
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.types import CachePolicy
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -8,15 +9,22 @@ from firecrawl import Firecrawl
 
 from Prompts import create_research_prompt, create_research_document_prompt, evaluate_research_prompt
 from States import AgnentState, Research_Questions, Evaluate_research
-
+import asyncio
 from dotenv import load_dotenv
 load_dotenv()
 
+model = ChatGroq(model="meta-llama/llama-4-scout-17b-16e-instruct", temperature=0.5)
 
-model = ChatGroq(model="meta-llama/llama-4-scout-17b-16e-instruct")
+
+async def stream_text(text, delay=0.05):
+    text = str(text)
+    for word in text.split():
+        print(word, end=" ", flush=True)
+        await asyncio.sleep(delay)
+    print()
 
 
-def create_questions(state: AgnentState):
+async def create_questions(state: AgnentState):
     """
     Creates Research Questions from topic provided by user
     """
@@ -26,11 +34,10 @@ def create_questions(state: AgnentState):
 		SystemMessage(content=create_research_prompt),
 		HumanMessage(content=state["messages"][-1].content)
 	]
-    result = question_generator.invoke(prompt)
+    result = await question_generator.ainvoke(prompt)
     
     print("="*50, "QUESTIONS", "="*50)
-    print(result.questions) # type: ignore
-    
+    await stream_text(result.questions) # type: ignore
     
     return {
 		"research_question" : result.questions, # type: ignore
@@ -38,7 +45,7 @@ def create_questions(state: AgnentState):
 		"retry_document" : state.get("retry_document", 0)
 	}
 
-def tavily_research(state: AgnentState):
+async def tavily_research(state: AgnentState):
     """
     Perform search using Tavily API
     """
@@ -46,70 +53,48 @@ def tavily_research(state: AgnentState):
     tavily = TavilyClient()
     research_chunk = []
     
+    print("="*50, "RESEARCH CHUNK", "="*50)
+    await stream_text("fetching results from web...")
+    
     for question in state["research_question"]:
         result = tavily.search(
 			query=question,
 			search_depth="advanced",
-			max_results=2,
+			max_results=1,
 			include_answer=False,
 			include_raw_content=True,
 		)
-        for item in result.get("results", []):
+        for i, item in enumerate(result.get("results", [])):
             if item.get("content"):
                 research_chunk.append(
-				f"SOURCE: {item['url']}\n"
+				f"SOURCE {i}: {item['url']}\n"
 				f"TITLE: {item['title']}\n"
 				f"CONTENT: \n{item['content']}"
 				)
+                
+                await stream_text(f"SOURCE: {item['url']}\n"
+				f"TITLE: {item['title']}\n"
+				f"CONTENT: \n{item['content'][:100]}.....\n"
+				)
     
-    print("="*50, "RESEARCH CHUNK", "="*50)
-    print(research_chunk)
-
     return{
 		"research_chunk" : research_chunk
 	}
 
-# def firecrawl_research(state: AgnentState):
-#     """
-#     Perform search using Firecrawl API
-#     Output format matches tavily_research (research_chunk)
-#     """
-#     firecrawl = Firecrawl()
-#     research_chunk = []
-
-#     for question in state["research_question"]:
-#         result = firecrawl.search(
-#             query=question,
-#             limit=1
-#         )
-#         
-#         if result.web:
-#             for item in result.web:
-#                 research_chunk.append(
-#                     f"SOURCE: {item.url}\n"
-#                     f"TITLE: {item.title}\n"
-#                     f"CONTENT:\n{item.description}"
-#                 )
-    
-#     print("="*50, "RESEARCH CHUNK", "="*50)
-#     print(research_chunk)
-#     return {
-#         "research_chunk": research_chunk
-#     }
-
-def create_doc(state: AgnentState):
+async def create_doc(state: AgnentState):
 	"""
 	Create a research document from the research text
 	"""
 
+	await stream_text("Creating research document...")
 	prompt = [
 		SystemMessage(content=create_research_document_prompt),
 		HumanMessage(content="\n\n---\n\n".join(state["research_chunk"]))
 	]
-	research_doc = model.invoke(prompt)
+	research_doc = await model.ainvoke(prompt)
 	
 	print("="*50, "RESEARCH DOCUMENT", "="*50)
-	print(research_doc.content)
+	await stream_text(research_doc.content)
 	
 	return {
 		"final_doc" : research_doc.content,
@@ -117,22 +102,22 @@ def create_doc(state: AgnentState):
 	}
 
 
-def evaluate_research(state: AgnentState):
+async def evaluate_research(state: AgnentState):
 	"""
 	Evaluate the research text using LLM, 
 	threshold is 0.7
 	"""
-	evaluation_model = model.with_structured_output(Evaluate_research) 
+	await stream_text("Evaluating research document...")
+	evaluation_model = model.with_structured_output(Evaluate_research).bind(temperature=0)
 	prompt = [
-		SystemMessage(content=evaluate_research_prompt.format(evaluate_score = 0.7)),
-		HumanMessage(content=state["final_doc"]) # state[-1].content
+		SystemMessage(content=evaluate_research_prompt.replace("{evaluate_score}", "0.7")),
+		HumanMessage(content=state["final_doc"])
 	]
 
-	evaluation = evaluation_model.invoke(prompt)
+	evaluation = await evaluation_model.ainvoke(prompt)
 	
 	print("="*50, "EVALUATION", "="*50)
-	print(evaluation)
-	
+	await stream_text(evaluation)
 	
 	return{
 		"evaluation_score" : evaluation.overall_score, # type: ignore
@@ -160,7 +145,7 @@ def router(state: AgnentState):
 graph = StateGraph(AgnentState)
 
 graph.add_node("create_questions", create_questions)
-graph.add_node("tavily", tavily_research)
+graph.add_node("tavily", tavily_research, cache_policy=CachePolicy(ttl=2000))
 graph.add_node("create_doc", create_doc)
 graph.add_node("evaluate_research", evaluate_research)
 
@@ -184,9 +169,8 @@ checkpointer = InMemorySaver()
 app = graph.compile(checkpointer=checkpointer)
 
 
-response = app.invoke({"messages": ["I want do research on the best coffee shops in India."]}, {"configurable": {"thread_id": "user-session-1"}}) # type: ignore
-# response = app.invoke({"messages": ["Do research on coffee and tea and anything related to drinks in the world, include history, health benefits, stock prices, recipes, future predictions, and also recommend the best café for me personally."]}, {"configurable": {"thread_id": "user-session-1"}}) # type: ignore
+async def main():
+	response = await app.ainvoke({"messages": ["I want do research on transformers in deep learning"]}, {"configurable": {"thread_id": "user-session-1"}}) # type: ignore
 
-print("="*50, "RESPONSE", "="*50)
-print(response["messages"][-1].content)
 
+asyncio.run(main())
