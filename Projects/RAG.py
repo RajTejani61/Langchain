@@ -1,35 +1,18 @@
-from langgraph.graph import MessagesState, StateGraph, START, END
-from langgraph.checkpoint.memory import InMemorySaver
-
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain.agents import create_agent
+from langchain.tools import tool	
+from langchain.agents.middleware import ToolCallLimitMiddleware
 from langchain_groq import ChatGroq
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_classic.text_splitter import RecursiveCharacterTextSplitter
 from langchain_pinecone import PineconeVectorStore
+from pinecone.grpc import PineconeGRPC
 
-from pydantic import BaseModel, Field
-from typing import List
 from dotenv import load_dotenv
 load_dotenv()
 
-class AgentState(MessagesState):
-	question : str
-	if_doc_related : bool
-	retrival_questions : List[str]
-	context : List[str]
-	answer : str
-
-class Classify_Question(BaseModel):
-	if_doc_related : bool = Field(default=False, description="True if the question requires the uploaded document to answer.")
-
-class RetrievalQuestions(BaseModel):
-    questions : List[str] = Field(description="3 to 5 short search queries for retrieving document context.")
-
-
 model = ChatGroq(model="openai/gpt-oss-120b")
 splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
-
 
 def load_pdf(path):
     print("Adding documents...")
@@ -53,145 +36,114 @@ def load_pdf(path):
 path = "D:\\Langchain\\Projects\\AI_internship_Update.pdf"
 VECTORSTORE = load_pdf(path)
 # VECTORSTORE = PineconeVectorStore(
-# 	index_name="simple-qa-rag",
-# 	embedding=GoogleGenerativeAIEmbeddings(model="gemini-embedding-001")
-# )
-
-def clarify_question(state : AgentState):
-    
-    system_prompt = f"""
-	You are a classifier.
-    
-	Your job:
-	1. Rewrite the user question to be clear and specific.
-	2. Decide if the question can be answered ONLY using the uploaded document.
-    
-	Rules:
-	- If document knowledge is required → if_doc_related = true
-	- If general knowledge is enough → false
-	- Do NOT answer the question.
-	"""
-    
-    llm = model.with_structured_output(Classify_Question)
-    response = llm.invoke(
-        [SystemMessage(content=system_prompt), 
-        HumanMessage(content=state["question"])]
-        )
-    
-    print("="*100, "CLASSIFICATION", "="*100)
-    print(response)
-	
-    return {
-		"if_doc_related" : response.if_doc_related # type: ignore
-	}
-
-def routing(state: AgentState):
-    if state["if_doc_related"]:
-        return "get_context"
-    return "answer_directly"
-
-def retrival_questions(state : AgentState):
-    system_prompt = """
-		You generate search queries for document retrieval.
-
-		Rules:
-		- Generate 3 to 5 short, precise questions
-		- Questions must help retrieve relevant document sections
-		- Do not repeat the original question
-	"""
-    
-    llm = model.with_structured_output(RetrievalQuestions)
-	
-    response = llm.invoke(
-        [SystemMessage(content=system_prompt), 
-        HumanMessage(content=state["question"])]
-        )
-    
-    print("="*100, "RETRIVAL QUESTIONS", "="*100)
-    print(response)
-    
-    return {
-		"retrival_questions" : response.questions # type: ignore
-	}
-
-def retrieve_context(state : AgentState):
-    
-    retriver = VECTORSTORE.as_retriever(
-		search_type="similarity",
-		search_kwargs={"k": 5},
-	)
-    
-    docs = []
-    for q in state["retrival_questions"]:
-        response = retriver.invoke(q)
-        docs.extend(response)
-    
-    context = "\n\n ----- \n\n".join(d.page_content for d in docs)
-    print("="*100, "CONTEXT", "="*100)
-    print(context)
-    
-    return {
-		"context" : context
-	}
-
-def answer_with_context(state: AgentState):
-    system_prompt = """
-		You are a factual assistant.
-        
-		Rules:
-		- Answer ONLY from the provided context
-		- If the answer is missing, say: "Not found in document"
-		- Be concise and precise
-	"""
-    
-    response = model.invoke([
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=f"""
-		Context:
-		{state["context"]}
-    
-		Question:
-		{state["question"]}
-		""")
-    ])
-    
-    return {"answer": response.content}
-
-def direct_answer(state: AgentState):
-    response = model.invoke([
-        SystemMessage(content="You are a helpful assistant."),
-        HumanMessage(content=state["question"])
-    ])
-
-    return {"answer": response.content}
-
-graph = StateGraph(AgentState)
-
-graph.add_node("clarify_question", clarify_question)
-graph.add_node("generate_retrival_questions", retrival_questions)
-graph.add_node("retrvie_context", retrieve_context)
-graph.add_node("answer_with_context", answer_with_context)
-graph.add_node("direct_answer", direct_answer)
-
-graph.add_edge(START, "clarify_question")
-graph.add_conditional_edges(
-	"clarify_question",
-	routing,
-	{
-		"get_context": "generate_retrival_questions",
-		"answer_directly": "direct_answer"
-	}
-)
-graph.add_edge("generate_retrival_questions", "retrvie_context")
-graph.add_edge("retrvie_context", "answer_with_context")
-graph.add_edge("answer_with_context", END)
-graph.add_edge("direct_answer", END)
-
-app = graph.compile(checkpointer=InMemorySaver())
+#     index_name="simple-qa-rag",
+#     embedding=GoogleGenerativeAIEmbeddings(model="gemini-embedding-001")
+#     )
+PC = PineconeGRPC()
 
 
-# response = app.invoke({"question": "explain the machine learning from uploaded document?"}, {"configurable": {"thread_id": "user-session-1"}}) # type: ignore
-response = app.invoke({"question": "What topics are listed in the AI internship document?"}, {"configurable": {"thread_id": "user-session-1"}}) # type: ignore
+@tool
+def rag_retrieve(query: str) -> str:
+    """
+    Retrieve high-quality context from the uploaded document in vectorstore
+    using query rewriting, vector search, and reranking.
+    """
 
-print('='*50, "FINAL ANSWER", '='*50)
-print(response)
+    rewritten = f"Detailed explanation of: {query}"
+
+    retriever = VECTORSTORE.as_retriever(
+        search_type="similarity",
+        search_kwargs={"k": 10},
+    )
+
+    docs = retriever.invoke(rewritten)
+
+    reranked = PC.inference.rerank(
+        model="bge-reranker-v2-m3",
+        query=rewritten,
+        documents=[d.page_content for d in docs],
+        top_n=5,
+        return_documents=True,
+    )
+
+    if not reranked.data:
+        return ""
+
+    context = "\n\n---\n\n".join(
+        item["document"]["text"] for item in reranked.data
+    )
+
+    return context
+
+SYSTEM_PROMPT = """
+You are a document question-answering agent.
+
+You MUST strictly follow this workflow protocol.
+
+====================
+WORKFLOW
+====================
+
+1 — Question Reformulation
+- Rewrite the user question into a clear, explicit, well-structured query
+- Expand acronyms
+- Add missing context
+
+2 — Retrieval
+- Call the tool `rag_retrieve` using the rewritten question
+- Store the returned text as CONTEXT
+
+3 — Answer Generation
+- Generate the answer using ONLY the retrieved CONTEXT
+- You MAY summarize, rephrase, or generalize ideas
+    IF they are clearly implied by the context
+- Do NOT introduce facts not supported by the context
+- If the context does not contain enough information,
+    say: "No result found in document"
+
+
+4 — Self-Evaluation
+- Check whether the answer is correct:
+- Is fully supported by the context
+- Decide: PASS or FAIL
+
+5 — Conditional Retry
+- If PASS:
+    - Output the final answer and STOP
+- If FAIL:
+    - Rewrite the question to be more specific
+    - Call `rag_retrieve` again
+    - Repeat from Step 3
+- You may retry retrieval at most ONE additional time
+
+====================
+STRICT RULES
+====================
+- Never call the tool more than TWO times total
+- Never call the tool after you have decided PASS
+- Never answer without context
+- Final output must be ONLY the answer text
+
+====================
+END
+====================
+"""
+
+
+agent = create_agent(
+    model=model,
+    tools=[rag_retrieve],
+    system_prompt=SYSTEM_PROMPT,
+    middleware=[
+        ToolCallLimitMiddleware(
+            tool_name="rag_retrieve",
+            thread_limit=5,
+            run_limit=3,
+        ), # type: ignore
+    ],
+)	
+
+response = agent.invoke({"messages": [{"role": "user", "content": "expplain about langchain ?"}]})
+# response = agent.invoke({"messages": [{"role": "user", "content": "what are teh topics covered in the document ?"}]})
+
+print(response) 
