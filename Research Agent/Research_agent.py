@@ -105,10 +105,16 @@ def evaluate_research(state: AgnentState):
         HumanMessage(content=state["final_doc"]),
     ]
     
-    result = evaluation_model.invoke(prompt)
-    print(result.overall_score) # type: ignore
-    print(result.improvement_type) # type: ignore
-    print(result.improvement_suggestion) # type: ignore
+    # result = evaluation_model.invoke(prompt)
+    # print(result.overall_score) # type: ignore
+    # print(result.improvement_type) # type: ignore
+    # print(result.improvement_suggestion) # type: ignore
+    
+    for result in evaluation_model.stream(prompt):
+        print(result.overall_score) # type: ignore
+        print(result.improvement_type) # type: ignore
+        print(result.improvement_suggestion) # type: ignore
+    
     return {
         "evaluation_score": result.overall_score, # type: ignore
         "improvement_type": result.improvement_type, # type: ignore
