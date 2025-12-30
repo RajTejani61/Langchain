@@ -1,30 +1,20 @@
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.types import CachePolicy
+
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from tavily import TavilyClient
-from firecrawl import Firecrawl
 
 from Prompts import create_research_prompt, create_research_document_prompt, evaluate_research_prompt
 from States import AgnentState, Research_Questions, Evaluate_research
-import asyncio
+
 from dotenv import load_dotenv
 load_dotenv()
 
 model = ChatGroq(model="meta-llama/llama-4-scout-17b-16e-instruct", temperature=0.5)
 
-
-async def stream_text(text, delay=0.05):
-    text = str(text)
-    for word in text.split():
-        print(word, end=" ", flush=True)
-        await asyncio.sleep(delay)
-    print()
-
-
-async def create_questions(state: AgnentState):
+def create_questions(state: AgnentState):
     """
     Creates Research Questions from topic provided by user
     """
@@ -34,10 +24,11 @@ async def create_questions(state: AgnentState):
 		SystemMessage(content=create_research_prompt),
 		HumanMessage(content=state["messages"][-1].content)
 	]
-    result = await question_generator.ainvoke(prompt)
     
-    print("="*50, "QUESTIONS", "="*50)
-    await stream_text(result.questions) # type: ignore
+    print("="*50, "QUESTIONS", "="*50, flush=True)
+    for result in question_generator.stream(prompt):
+        print("Generating questions...")
+        print(result.questions) # type: ignore
     
     return {
 		"research_question" : result.questions, # type: ignore
@@ -45,7 +36,7 @@ async def create_questions(state: AgnentState):
 		"retry_document" : state.get("retry_document", 0)
 	}
 
-async def tavily_research(state: AgnentState):
+def tavily_research(state: AgnentState):
     """
     Perform search using Tavily API
     """
@@ -53,8 +44,8 @@ async def tavily_research(state: AgnentState):
     tavily = TavilyClient()
     research_chunk = []
     
-    print("="*50, "RESEARCH CHUNK", "="*50)
-    await stream_text("fetching results from web...")
+    print("\n\n", "="*50, "RESEARCH CHUNK", "="*50)
+    print("fetching results from web...")
     
     for question in state["research_question"]:
         result = tavily.search(
@@ -72,58 +63,58 @@ async def tavily_research(state: AgnentState):
 				f"CONTENT: \n{item['content']}"
 				)
                 
-                await stream_text(f"SOURCE: {item['url']}\n"
+                print(f"SOURCE: {item['url']}\n"
 				f"TITLE: {item['title']}\n"
-				f"CONTENT: \n{item['content'][:100]}.....\n"
-				)
-    
+				f"CONTENT: \n{item['content'][:100]}.....\n")
+	
     return{
 		"research_chunk" : research_chunk
 	}
 
-async def create_doc(state: AgnentState):
+def create_doc(state: AgnentState):
 	"""
 	Create a research document from the research text
 	"""
 
-	await stream_text("Creating research document...")
+	print("Creating research document...")
 	prompt = [
 		SystemMessage(content=create_research_document_prompt),
 		HumanMessage(content="\n\n---\n\n".join(state["research_chunk"]))
 	]
-	research_doc = await model.ainvoke(prompt)
 	
 	print("="*50, "RESEARCH DOCUMENT", "="*50)
-	await stream_text(research_doc.content)
+	for chunk in model.stream(prompt):
+		pass
 	
 	return {
-		"final_doc" : research_doc.content,
+		"final_doc" : chunk.content,
 		"retry_document" : state.get("retry_document", 0) + 1,
 	}
 
 
-async def evaluate_research(state: AgnentState):
-	"""
-	Evaluate the research text using LLM, 
-	threshold is 0.7
-	"""
-	await stream_text("Evaluating research document...")
-	evaluation_model = model.with_structured_output(Evaluate_research).bind(temperature=0)
-	prompt = [
-		SystemMessage(content=evaluate_research_prompt.replace("{evaluate_score}", "0.7")),
-		HumanMessage(content=state["final_doc"])
-	]
+def evaluate_research(state: AgnentState):
+    """
+    Evaluate the research text using LLM, 
+    threshold is 0.7
+    """
+    print("\n\n" +"="*50, "EVALUATION", "="*50)
+    print("Evaluating research document...")
+    evaluation_model = model.with_structured_output(Evaluate_research).bind(temperature=0.3)
+    prompt = [
+        SystemMessage(content=evaluate_research_prompt),
+        HumanMessage(content=state["final_doc"]),
+    ]
+    
+    result = evaluation_model.invoke(prompt)
+    print(result.overall_score) # type: ignore
+    print(result.improvement_type) # type: ignore
+    print(result.improvement_suggestion) # type: ignore
+    return {
+        "evaluation_score": result.overall_score, # type: ignore
+        "improvement_type": result.improvement_type, # type: ignore
+        "improvement_suggestion": result.improvement_suggestion, # type: ignore
+    }
 
-	evaluation = await evaluation_model.ainvoke(prompt)
-	
-	print("="*50, "EVALUATION", "="*50)
-	await stream_text(evaluation)
-	
-	return{
-		"evaluation_score" : evaluation.overall_score, # type: ignore
-		"improvement_type" : evaluation.improvement_type, # type: ignore
-		"improvement_suggestion" : evaluation.improvement_suggestion # type: ignore
-	}
 
 def router(state: AgnentState):
     improvement_type = state.get("improvement_type", "no_improvement")
@@ -145,7 +136,7 @@ def router(state: AgnentState):
 graph = StateGraph(AgnentState)
 
 graph.add_node("create_questions", create_questions)
-graph.add_node("tavily", tavily_research, cache_policy=CachePolicy(ttl=2000))
+graph.add_node("tavily", tavily_research)
 graph.add_node("create_doc", create_doc)
 graph.add_node("evaluate_research", evaluate_research)
 
@@ -169,8 +160,10 @@ checkpointer = InMemorySaver()
 app = graph.compile(checkpointer=checkpointer)
 
 
-async def main():
-	response = await app.ainvoke({"messages": ["I want do research on transformers in deep learning"]}, {"configurable": {"thread_id": "user-session-1"}}) # type: ignore
-
-
-asyncio.run(main())
+for message_chunk, metadata in app.stream(
+    {"messages": ["I want do research best coffee shops in india"]}, # type: ignore
+	config={"configurable": {"thread_id": "user-session-1"}},
+    stream_mode="messages",  
+):
+    
+	print(message_chunk.content, end="", flush=True) # type: ignore
