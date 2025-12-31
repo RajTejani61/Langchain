@@ -8,6 +8,7 @@ from langchain_classic.text_splitter import RecursiveCharacterTextSplitter
 from langchain_pinecone import PineconeVectorStore
 from pinecone.grpc import PineconeGRPC
 
+from typing import List
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -43,35 +44,37 @@ PC = PineconeGRPC()
 
 
 @tool
-def rag_retrieve(query: str) -> str:
+def rag_retrieve(query : List[str]) -> str:
     """
     Retrieve high-quality context from the uploaded document in vectorstore
     using query rewriting, vector search, and reranking.
     """
-
-    rewritten = f"Detailed explanation of: {query}"
-
+    
     retriever = VECTORSTORE.as_retriever(
         search_type="similarity",
         search_kwargs={"k": 10},
     )
 
-    docs = retriever.invoke(rewritten)
-
-    reranked = PC.inference.rerank(
-        model="bge-reranker-v2-m3",
-        query=rewritten,
-        documents=[d.page_content for d in docs],
-        top_n=5,
-        return_documents=True,
-    )
-
-    if not reranked.data:
+    retriever_docs = []
+    for q in query:
+        
+        retriever_docs.extend(retriever.invoke(q))
+        
+        reranked = PC.inference.rerank(
+            model="bge-reranker-v2-m3",
+            query=q,
+            documents=[d.page_content for d in retriever_docs],
+            top_n=5,
+            return_documents=True,
+        )
+        
+        context = "\n\n---\n\n".join(
+            item["document"]["text"] for item in reranked.data
+        )
+        
+    
+    if context == []:
         return ""
-
-    context = "\n\n---\n\n".join(
-        item["document"]["text"] for item in reranked.data
-    )
 
     return context
 
@@ -86,11 +89,12 @@ WORKFLOW
 
 1 — Question Reformulation
 - Rewrite the user question into a clear, explicit, well-structured query
+- if there are multiple questions in one query, then generate list of questions for ecah one
 - Expand acronyms
 - Add missing context
 
 2 — Retrieval
-- Call the tool `rag_retrieve` using the rewritten question
+- Call the tool `rag_retrieve` using the list of rewritten questions
 - Store the returned text as CONTEXT
 
 3 — Answer Generation
@@ -114,6 +118,7 @@ WORKFLOW
     - Rewrite the question to be more specific
     - Call `rag_retrieve` again
     - Repeat from Step 3
+    - After 3 retries, generate the final answer from the context
 - You may retry retrieval at most ONE additional time
 
 ====================
@@ -143,7 +148,7 @@ agent = create_agent(
     ],
 )	
 
-response = agent.invoke({"messages": [{"role": "user", "content": "expplain about langchain ?"}]})
+response = agent.invoke({"messages": [{"role": "user", "content": "expplain about langchain and langgraph ?"}]})
 # response = agent.invoke({"messages": [{"role": "user", "content": "what are teh topics covered in the document ?"}]})
 
-print(response) 
+print(response["messages"][-1]["content"]) 
