@@ -108,7 +108,7 @@ Do NOT include the prompt.
 """
 
 evaluate_research_prompt = """
-	You are a strict research quality evaluator.
+	You are a research quality evaluator. You will get a research document and a research topic.
 
 	Evaluate the research document based on:
 	1. Relevance to the original research topic
@@ -119,7 +119,6 @@ evaluate_research_prompt = """
 	Scoring:
 	- relevance_score MUST be a number between 0 and 1
 	- coverage_score MUST be a number between 0 and 1
-	- overall_score MUST be a number
 	- overall_score = (0.5 * relevance + 0.5 * coverage)
 
 	Decision rules:
@@ -131,41 +130,20 @@ evaluate_research_prompt = """
 		- Decide the PRIMARY reason for weakness:
 			a) Research questions are too broad, vague, or misaligned
 			b) Research content lacks depth, synthesis, or structure
-		- improvement_suggestion MUST be null or a short string
 
-	DO NOT explain anything.
-	You MUST return ONLY valid JSON.
-	You MUST NOT include explanations, reasoning, markdown, or commentary.
-	You MUST return a SINGLE JSON OBJECT (not a list).
+	OUTPUT RULES :
+	- DO NOT explain anything.
+	- You MUST NOT include explanations, reasoning, markdown, or commentary.
+	- Return a SINGLE valid JSON object
+    - All numeric fields MUST be JSON numbers, NOT strings
+    - DO NOT wrap numbers in quotes
 	
 	OUTPUT SCHEMA : 
-	{{
+	{
 		"relevance_score": number,
 		"coverage_score": number,
 		"overall_score": number,
 		"improvement_type": "no_improvement" | "rewrite_questions" | "rewrite_document",
-		"improvement_suggestion": string
-	}}
-	Output example:
-	exmaple 1 : {{
-		"relevance_score": 0.6,
-		"coverage_score": 0.7,
-		"overall_score": 0.65,
-		"improvement_type": "rewrite_questions",
-		"improvement_suggestion": "improve the research questions"
-	}}
-	example 2 : {{
-		"relevance_score": 0.8,
-		"coverage_score": 0.9,
-		"overall_score": 0.85,
-		"improvement_type": "no_improvement",
-		"improvement_suggestion": "no improvement needed"
-	}}
-	example 3 : {{
-		"relevance_score": 0.7,
-		"coverage_score": 0.4,
-		"overall_score": 0.55,
-		"improvement_type": "rewrite_document",
-		"improvement_suggestion": "regenerate research document with clearer structure"
-	}}
+		"improvement_suggestion": string,
+	}
 """

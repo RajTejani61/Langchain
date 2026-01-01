@@ -9,6 +9,7 @@ from tavily import TavilyClient
 from Prompts import create_research_prompt, create_research_document_prompt, evaluate_research_prompt
 from States import AgnentState, Research_Questions, Evaluate_research
 
+from Research_Text import research_text
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -19,22 +20,27 @@ def create_questions(state: AgnentState):
     Creates Research Questions from topic provided by user
     """
     
-    question_generator = model.with_structured_output(Research_Questions)
     prompt = [
-		SystemMessage(content=create_research_prompt),
-		HumanMessage(content=state["messages"][-1].content)
-	]
+        SystemMessage(content=create_research_prompt),
+        HumanMessage(content=state["messages"][-1].content)
+    ]
     
+    # question_generator = model
+    # print("="*50, "QUESTIONS", "="*50, flush=True)
+    # for question in question_generator.stream(prompt):
+    #     if question.content:
+    #         yield {"question" : question}
+    
+    question_generator = model.with_structured_output(Research_Questions)
     print("="*50, "QUESTIONS", "="*50, flush=True)
-    for result in question_generator.stream(prompt):
-        print("Generating questions...")
-        print(result.questions) # type: ignore
+    result = question_generator.invoke(prompt)
+    print(result.questions) # type: ignore
     
     return {
-		"research_question" : result.questions, # type: ignore
-		"retry_question" : state.get("retry_question", 0) + 1,
-		"retry_document" : state.get("retry_document", 0)
-	}
+        "research_question" : result.questions, # type: ignore
+        "retry_question" : state.get("retry_question", 0) + 1,
+        "retry_document" : state.get("retry_document", 0),
+    }
 
 def tavily_research(state: AgnentState):
     """
@@ -49,47 +55,59 @@ def tavily_research(state: AgnentState):
     
     for question in state["research_question"]:
         result = tavily.search(
-			query=question,
-			search_depth="advanced",
-			max_results=1,
-			include_answer=False,
-			include_raw_content=True,
-		)
+            query=question,
+            search_depth="advanced",
+            max_results=1,
+            include_answer=False,
+            include_raw_content=True,
+        )
         for i, item in enumerate(result.get("results", [])):
             if item.get("content"):
                 research_chunk.append(
-				f"SOURCE {i}: {item['url']}\n"
-				f"TITLE: {item['title']}\n"
-				f"CONTENT: \n{item['content']}"
-				)
+                    f"SOURCE {i}: {item['url']}\n"
+                    f"TITLE: {item['title']}\n"
+                    f"CONTENT: \n{item['content']}"
+                )
                 
                 print(f"SOURCE: {item['url']}\n"
-				f"TITLE: {item['title']}\n"
-				f"CONTENT: \n{item['content'][:100]}.....\n")
-	
+                        f"TITLE: {item['title']}\n"
+                        f"CONTENT: \n{item['content'][:100]}.....\n")
+    
+    # for i, item in enumerate(research_text):
+    #     research_chunk.append(
+    #     f"SOURCE {i}: {item['url']}\n"
+    #     f"TITLE: {item['title']}\n"
+    #     f"CONTENT: \n{item['content']}"
+    #     )
+        
+    #     print (f"SOURCE: {item['url']}\n"
+    #     f"TITLE: {item['title']}\n"
+    #     f"CONTENT: \n{item['content'][:100]}.....\n")
+    
     return{
-		"research_chunk" : research_chunk
-	}
+        "research_chunk" : research_chunk
+    }
 
 def create_doc(state: AgnentState):
-	"""
-	Create a research document from the research text
-	"""
+    """
+    Create a research document from the research text
+    """
 
-	print("Creating research document...")
-	prompt = [
-		SystemMessage(content=create_research_document_prompt),
-		HumanMessage(content="\n\n---\n\n".join(state["research_chunk"]))
-	]
-	
-	print("="*50, "RESEARCH DOCUMENT", "="*50)
-	for chunk in model.stream(prompt):
-		pass
-	
-	return {
-		"final_doc" : chunk.content,
-		"retry_document" : state.get("retry_document", 0) + 1,
-	}
+    print("Creating research document...")
+    prompt = [
+        SystemMessage(content=create_research_document_prompt),
+        HumanMessage(content="\n\n---\n\n".join(state["research_chunk"]))
+    ]
+    
+    print("="*50, "RESEARCH DOCUMENT", "="*50)
+    for chunk in model.stream(prompt):
+        if chunk.content:
+            yield {"final_doc" : chunk.content}
+    
+    return {
+        "final_doc" : chunk.content,
+        "retry_document" : state.get("retry_document", 0) + 1,
+    }
 
 
 def evaluate_research(state: AgnentState):
@@ -99,21 +117,22 @@ def evaluate_research(state: AgnentState):
     """
     print("\n\n" +"="*50, "EVALUATION", "="*50)
     print("Evaluating research document...")
-    evaluation_model = model.with_structured_output(Evaluate_research).bind(temperature=0.3)
+    
+    final_doc = state["final_doc"]
     prompt = [
         SystemMessage(content=evaluate_research_prompt),
-        HumanMessage(content=state["final_doc"]),
-    ]
+        HumanMessage(content=f"""
+        RESEARCH DOCUMENT:
+        {final_doc}
+        """)
+            ]
+
+    evaluation_model = model.with_structured_output(Evaluate_research)
+    result = evaluation_model.invoke(prompt)
     
-    # result = evaluation_model.invoke(prompt)
-    # print(result.overall_score) # type: ignore
-    # print(result.improvement_type) # type: ignore
-    # print(result.improvement_suggestion) # type: ignore
-    
-    for result in evaluation_model.stream(prompt):
-        print(result.overall_score) # type: ignore
-        print(result.improvement_type) # type: ignore
-        print(result.improvement_suggestion) # type: ignore
+    print("Overall Score:", result.overall_score) # type: ignore
+    print("Improvement Type:", result.improvement_type) # type: ignore
+    print("Improvement Suggestion:", result.improvement_suggestion) # type: ignore
     
     return {
         "evaluation_score": result.overall_score, # type: ignore
@@ -153,13 +172,13 @@ graph.add_edge("tavily", "create_doc")
 graph.add_edge("create_doc", "evaluate_research")
 
 graph.add_conditional_edges(
-	"evaluate_research",
-	router,
-	{
-		"rewrite_questions": "create_questions",
-		"regenerate_doc": "create_doc",
-		"end": END
-	}
+    "evaluate_research",
+    router,
+    {
+        "rewrite_questions": "create_questions",
+        "regenerate_doc": "create_doc",
+        "end": END
+    }
 )
 
 checkpointer = InMemorySaver()
@@ -168,8 +187,7 @@ app = graph.compile(checkpointer=checkpointer)
 
 for message_chunk, metadata in app.stream(
     {"messages": ["I want do research best coffee shops in india"]}, # type: ignore
-	config={"configurable": {"thread_id": "user-session-1"}},
+    config={"configurable": {"thread_id": "user-session-1"}},
     stream_mode="messages",  
 ):
-    
-	print(message_chunk.content, end="", flush=True) # type: ignore
+    print(message_chunk.content, end="", flush=True) # type: ignore
