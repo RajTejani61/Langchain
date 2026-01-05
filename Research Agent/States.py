@@ -10,6 +10,8 @@ from typing import List, Literal
 from langchain_core.messages import AIMessage
 class AgnentState(MessagesState):
     
+    cache_hit : bool
+    user_query : str
     research_question : List[str]
     research_chunk : List[str]
     final_doc : str
@@ -29,3 +31,4 @@ class Evaluate_research(BaseModel):
     overall_score: float = Field(default=0, description="Final weighted score from 0 to 1")
     improvement_type : Literal["no_improvement", "rewrite_questions", "rewrite_document"] = Field(description="What action should be taken next")
     improvement_suggestion: str | None = Field(description="How to improve the research query or document if score is low")
+

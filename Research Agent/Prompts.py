@@ -108,42 +108,46 @@ Do NOT include the prompt.
 """
 
 evaluate_research_prompt = """
-	You are a research quality evaluator. You will get a research document and a research topic.
+	You are a research evaluator.
 
-	Evaluate the research document based on:
-	1. Relevance to the original research topic
-	2. Depth and coverage
-	3. Logical structure
-	4. Usefulness for decision-making
+	You will be given:
+	- A research topic
+	- A research document
 
-	Scoring:
-	- relevance_score MUST be a number between 0 and 1
-	- coverage_score MUST be a number between 0 and 1
-	- overall_score = (0.5 * relevance + 0.5 * coverage)
+	Your job is to evaluate the research document based on:
 
-	Decision rules:
-	- If overall_score >= 0.7:
-		- is_improvement_needed = false
-		- improvement_suggestion = null
-	- If overall_score < 0.7:
-		- improvement_type must be one of : ["rewrite_questions", "rewrite_document", "no_improvement"]
-		- Decide the PRIMARY reason for weakness:
-			a) Research questions are too broad, vague, or misaligned
-			b) Research content lacks depth, synthesis, or structure
+	1. How relevant it is to the research topic  
+	2. How well the topic is covered and how deep the research is  
+	3. How clear and logical the structure is  
+	4. How useful the research is for making decisions  
 
-	OUTPUT RULES :
-	- DO NOT explain anything.
-	- You MUST NOT include explanations, reasoning, markdown, or commentary.
-	- Return a SINGLE valid JSON object
-    - All numeric fields MUST be JSON numbers, NOT strings
-    - DO NOT wrap numbers in quotes
-	
-	OUTPUT SCHEMA : 
+	### Scoring rules
+	- relevance_score must be a number between 0 and 1  
+	- coverage_score must be a number between 0 and 1  
+	- overall_score = (0.5 * relevance_score) + (0.5 * coverage_score)
+
+	### Decision rules
+	- If overall_score is 0.7 or higher:
+	- is_improvement_needed = false
+	- improvement_suggestion = null
+
+	- If overall_score is below 0.7:
+	- improvement_type must be one of:
+		["rewrite_questions", "rewrite_document", "no_improvement"]
+	- Choose the MAIN reason for the weakness:
+		a) The research questions are too broad, unclear, or not aligned with the topic  
+		b) The research content is weak, lacks depth, synthesis, or clear structure  
+
+	### Output rules
+	- All numeric values must be JSON numbers (not strings)
+	- Do NOT put numbers inside quotes
+
+	### Output format (JSON only)
 	{
-		"relevance_score": number,
-		"coverage_score": number,
-		"overall_score": number,
-		"improvement_type": "no_improvement" | "rewrite_questions" | "rewrite_document",
-		"improvement_suggestion": string,
+	"relevance_score": number,
+	"coverage_score": number,
+	"overall_score": number,
+	"improvement_type": "no_improvement" | "rewrite_questions" | "rewrite_document",
+	"improvement_suggestion": string
 	}
 """

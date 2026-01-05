@@ -2,18 +2,91 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import InMemorySaver
 
 from langchain_groq import ChatGroq
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_pinecone import PineconeVectorStore
 
 from tavily import TavilyClient
+import json
 
 from Prompts import create_research_prompt, create_research_document_prompt, evaluate_research_prompt
 from States import AgnentState, Research_Questions, Evaluate_research
 
-from Research_Text import research_text
 from dotenv import load_dotenv
 load_dotenv()
 
+
 model = ChatGroq(model="meta-llama/llama-4-scout-17b-16e-instruct", temperature=0.5)
+embeddings = GoogleGenerativeAIEmbeddings(model='gemini-embedding-001')
+
+VECTORESTORE = PineconeVectorStore(
+    index_name="research-agent-semantic-cache",
+    embedding=embeddings,
+)
+DISTANCE = 0.8
+
+
+def get_cache(query: str):
+    
+    docs = VECTORESTORE.similarity_search_with_score(query, k=1)
+    # print("Cache found...")
+    # print(docs)
+    
+    if not docs:
+        return None
+    
+    doc, distance = docs[0]
+    if distance < DISTANCE:
+        print("Distance too short", distance)
+        return None
+    
+    if "response" not in doc.metadata:
+        print("No response in metadata", doc.metadata)
+        return None
+    
+    print("Distance : ", distance)
+    # print("Cache hit", doc.metadata["response"])
+    return json.loads(doc.metadata["response"])
+
+
+def set_cache(query: str, value: dict | list):
+    
+    VECTORESTORE.add_texts(
+        texts=[query],
+        metadatas=[{
+            "response": json.dumps(value),
+        }]
+    )
+
+
+def check_cache(state: AgnentState):
+    
+    query = str(state["messages"][-1].content).strip()
+    
+    print("Checking Cache query : ", query)
+    cached = get_cache(query)
+    
+    print("="*50, "CACHE RESULT", "="*50)
+    print(cached)
+    
+    if cached:
+        return {
+            "research_chunk": cached["research_chunk"],
+            "cache_hit": True,
+            "user_query": query,
+        }
+    
+    return {
+        "cache_hit": False,
+        "user_query": query,
+    }
+
+def cache_router(state: AgnentState):
+    if state.get("cache_hit"):
+        return "create_doc"
+    
+    return "create_questions"
+
 
 def create_questions(state: AgnentState):
     """
@@ -22,7 +95,7 @@ def create_questions(state: AgnentState):
     
     prompt = [
         SystemMessage(content=create_research_prompt),
-        HumanMessage(content=state["messages"][-1].content)
+        HumanMessage(content=state["user_query"])
     ]
     
     # question_generator = model
@@ -73,17 +146,13 @@ def tavily_research(state: AgnentState):
                         f"TITLE: {item['title']}\n"
                         f"CONTENT: \n{item['content'][:100]}.....\n")
     
-    # for i, item in enumerate(research_text):
-    #     research_chunk.append(
-    #     f"SOURCE {i}: {item['url']}\n"
-    #     f"TITLE: {item['title']}\n"
-    #     f"CONTENT: \n{item['content']}"
-    #     )
-        
-    #     print (f"SOURCE: {item['url']}\n"
-    #     f"TITLE: {item['title']}\n"
-    #     f"CONTENT: \n{item['content'][:100]}.....\n")
-    
+    set_cache(
+        query=state["user_query"], # type: ignore
+        value={
+            "research_chunk": research_chunk,
+        },
+    )
+
     return{
         "research_chunk" : research_chunk
     }
@@ -104,11 +173,10 @@ def create_doc(state: AgnentState):
         if chunk.content:
             yield {"final_doc" : chunk.content}
     
-    return {
+    yield {
         "final_doc" : chunk.content,
         "retry_document" : state.get("retry_document", 0) + 1,
     }
-
 
 def evaluate_research(state: AgnentState):
     """
@@ -122,13 +190,21 @@ def evaluate_research(state: AgnentState):
     prompt = [
         SystemMessage(content=evaluate_research_prompt),
         HumanMessage(content=f"""
-        RESEARCH DOCUMENT:
-        {final_doc}
-        """)
+            RESEARCH DOCUMENT:
+            {final_doc}
+            """)
             ]
 
     evaluation_model = model.with_structured_output(Evaluate_research)
-    result = evaluation_model.invoke(prompt)
+    try:
+        result = evaluation_model.invoke(prompt)
+    except Exception as e:
+        print(e)
+        return{
+            "evaluation_score": 0,
+            "improvement_type": "no_improvement",
+            "improvement_suggestion": "",
+        }
     
     print("Overall Score:", result.overall_score) # type: ignore
     print("Improvement Type:", result.improvement_type) # type: ignore
@@ -160,13 +236,24 @@ def router(state: AgnentState):
 
 graph = StateGraph(AgnentState)
 
+graph.add_node("check_cache", check_cache)
 graph.add_node("create_questions", create_questions)
 graph.add_node("tavily", tavily_research)
 graph.add_node("create_doc", create_doc)
 graph.add_node("evaluate_research", evaluate_research)
 
 
-graph.add_edge(START, "create_questions")
+graph.add_edge(START, "check_cache")
+
+graph.add_conditional_edges(
+    "check_cache",
+    cache_router,
+    {
+        "create_doc": "create_doc",
+        "create_questions": "create_questions",
+    }
+)
+
 graph.add_edge("create_questions", "tavily")
 graph.add_edge("tavily", "create_doc")
 graph.add_edge("create_doc", "evaluate_research")
@@ -186,7 +273,7 @@ app = graph.compile(checkpointer=checkpointer)
 
 
 for message_chunk, metadata in app.stream(
-    {"messages": ["I want do research best coffee shops in india"]}, # type: ignore
+    {"messages": ["I want do research best black coffee in india"]}, # type: ignore
     config={"configurable": {"thread_id": "user-session-1"}},
     stream_mode="messages",  
 ):
