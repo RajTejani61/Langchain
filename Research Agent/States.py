@@ -16,7 +16,7 @@ class AgnentState(MessagesState):
     research_chunk : List[str]
     final_doc : str
     
-    evaluation_score : float
+    overall_score : float
     improvemeclnt_type : Literal["no_improvement", "rewrite_questions", "rewrite_document"] | None
     improvement_suggestion : str
     retry_question : int 

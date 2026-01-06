@@ -190,10 +190,13 @@ def evaluate_research(state: AgnentState):
     prompt = [
         SystemMessage(content=evaluate_research_prompt),
         HumanMessage(content=f"""
+            TOPIC : 
+            {state["user_query"]}
+            
             RESEARCH DOCUMENT:
             {final_doc}
             """)
-            ]
+        ]
 
     evaluation_model = model.with_structured_output(Evaluate_research)
     try:
@@ -201,7 +204,7 @@ def evaluate_research(state: AgnentState):
     except Exception as e:
         print(e)
         return{
-            "evaluation_score": 0,
+            "overall_score": 0,
             "improvement_type": "no_improvement",
             "improvement_suggestion": "",
         }
@@ -211,7 +214,7 @@ def evaluate_research(state: AgnentState):
     print("Improvement Suggestion:", result.improvement_suggestion) # type: ignore
     
     return {
-        "evaluation_score": result.overall_score, # type: ignore
+        "overall_score": result.overall_score, # type: ignore
         "improvement_type": result.improvement_type, # type: ignore
         "improvement_suggestion": result.improvement_suggestion, # type: ignore
     }
