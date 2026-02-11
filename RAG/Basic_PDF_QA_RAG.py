@@ -1,6 +1,7 @@
 import streamlit as st
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -31,10 +32,11 @@ if uploaded_file:
     st.subheader("📜 Extracted Text (Preview)")
     st.text_area("Extracted Text", text[:1500] + "...", height=300)
     
-    llm = ChatGoogleGenerativeAI(
-		model="gemini-2.0-flash",
-		temperature=0.7
-	)
+    # llm = ChatGoogleGenerativeAI(
+	# 	model="gemini-2.0-flash",
+	# 	temperature=0.7
+	# )
+    llm = ChatGroq(model="meta-llama/llama-4-scout-17b-16e-instruct", temperature=0.7)
     parser = StrOutputParser()
     
     task = st.selectbox("Choose what to do with the extracted text:", [
@@ -78,6 +80,8 @@ if uploaded_file:
             result = branch_chain.invoke(inputs)
             st.subheader("✨ Result")
             st.write(result)
+            # for result in branch_chain.stream(inputs, stream_mode="messages"):
+            #     st.write("".join(result))
 
     # Cleanup
     os.remove(temp_file_path)
